@@ -21,6 +21,7 @@ from fastapi import Depends, FastAPI, Header, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
@@ -122,6 +123,7 @@ def create_app(services: Services | None = None, settings: Settings | None = Non
             max_age=600,
         )
     app.add_middleware(BodySizeLimit)
+    app.add_middleware(GZipMiddleware, minimum_size=1024)  # result tables and JS compress ~5x
 
     @app.middleware("http")
     async def request_context(request: Request, call_next):
@@ -282,13 +284,23 @@ def _bundled_eval() -> dict | None:
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
 
 
+class ImmutableStaticFiles(StaticFiles):
+    """Vite fingerprints asset filenames, so browsers may cache them for a year."""
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        if response.status_code == 200:
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+
+
 def _mount_web(app: FastAPI, web_dist: str | None) -> None:
     """Serve the built React app from the same origin, so no CORS is needed in production."""
     if not web_dist or not Path(web_dist, "index.html").exists():
         return
     root = Path(web_dist).resolve()
     if (root / "assets").exists():
-        app.mount("/assets", StaticFiles(directory=root / "assets"), name="assets")
+        app.mount("/assets", ImmutableStaticFiles(directory=root / "assets"), name="assets")
 
     @app.get("/{path:path}", include_in_schema=False)
     def spa(path: str):

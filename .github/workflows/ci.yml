@@ -32,7 +32,8 @@ jobs:
           cache-dependency-path: agent/requirements*.txt
       - run: pip install -r requirements-dev.txt
       - run: ruff check app tests eval
-      - run: pytest
+      - run: pytest  # enforces >= 90% coverage
+      - run: pip-audit -r requirements.txt
 
   web:
     runs-on: ubuntu-latest
@@ -47,6 +48,7 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci
+      - run: npm audit --omit=dev --audit-level=high
       - run: npm run lint
-      - run: npm test
+      - run: npm test  # enforces coverage thresholds
       - run: npm run build

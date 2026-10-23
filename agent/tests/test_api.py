@@ -199,7 +199,40 @@ def test_serves_spa_with_fallback_and_no_traversal(tmp_path):
     with TestClient(app) as client:
         assert "InsightPilot" in client.get("/").text
         assert "InsightPilot" in client.get("/history").text  # client-side route
-        assert client.get("/assets/app.js").text == "console.log(1)"
+        asset = client.get("/assets/app.js")
+        assert asset.text == "console.log(1)"
+        assert "immutable" in asset.headers["Cache-Control"]
         assert client.get("/api/nope").status_code == 404
         assert "nope" not in client.get("/..%2Fsecret.txt").text
         assert client.get("/").headers["Content-Security-Policy"].startswith("default-src 'self'")
+
+
+def test_large_responses_are_gzip_compressed(ctx):
+    client, _, _ = ctx
+    res = client.post(
+        "/api/ask",
+        json={"question": "Top categories by revenue"},
+        headers={"Authorization": "Bearer token-alice", "Accept-Encoding": "gzip"},
+    )
+    assert res.status_code == 200
+    assert res.headers.get("Content-Encoding") == "gzip"
+
+
+def test_eval_latest_returns_the_saved_run(ctx):
+    client, store, _ = ctx
+    auth = {"Authorization": "Bearer token-alice"}
+    assert client.get("/api/metrics/eval/latest", headers=auth).json() == {"run": None}
+    store.save_eval({"startedAt": "2026-10-23T10:00:00Z", "executionAccuracy": 0.9, "attackBlockRate": 1.0})
+    assert client.get("/api/metrics/eval/latest", headers=auth).json()["run"]["executionAccuracy"] == 0.9
+
+
+def test_schema_not_loaded_returns_503(ctx):
+    client, _, _ = ctx
+    client.app.state.services.deps.schema.ddl = None
+    assert ask(client, "Top categories").status_code == 503
+
+
+def test_dev_token_accepted_only_with_bypass():
+    from app.security import DEV_USER, firebase_verifier
+
+    assert firebase_verifier("demo-project", dev_bypass=True)("dev") == DEV_USER

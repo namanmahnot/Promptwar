@@ -24,3 +24,4 @@ insightpilot-docs.zip
 .vscode/
 .claude/
 !web/.env.production
+coverage/
