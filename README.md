@@ -1,136 +1,194 @@
 # InsightPilot
 
-**Ask a business question in plain English. Get a verified answer, a chart and the SQL behind it, in seconds, and nothing unsafe or expensive ever runs.**
+**Ask a business question in plain English. Get a verified answer, a chart and the SQL behind it in seconds, and nothing unsafe or expensive ever runs.**
 
-InsightPilot is an agentic BI analyst over the BigQuery public e-commerce dataset `thelook_ecommerce`. A LangGraph agent writes SQL with Gemini, deterministic code validates and cost-caps it, BigQuery runs it, and the numbers in the answer are computed from the result rows, never written by the model.
+## Problem
 
-## The problem
+Business owners and ops managers wait on an analyst for every ad-hoc question ("which categories lost revenue last quarter?"). Dashboards only answer the questions someone predicted. Generic AI chatbots answer instantly but invent numbers, and a wrong number is worse than no number.
 
-Business owners and ops managers wait on an analyst for every ad-hoc question. Dashboards only answer the questions someone predicted. Generic AI chatbots answer instantly but invent numbers, and a wrong number is worse than no number.
-
-InsightPilot answers in seconds, makes every number traceable to a BigQuery job, and keeps every query read-only, PII-free and cost-capped.
+InsightPilot is an agentic BI analyst over the BigQuery public dataset `thelook_ecommerce`. A LangGraph agent writes SQL with Gemini. Deterministic code validates and cost-caps that SQL, then BigQuery runs it. **Every number in the answer is computed from the result rows, never written by the model**, and the SQL, BigQuery job ID and per-step trace are shown with every answer.
 
 ## Architecture
 
 ```mermaid
 flowchart TB
-  web["React web app<br/>Firebase Hosting · Google sign-in"]
-  gw["Node/Express gateway · Cloud Run (public)<br/>token check, zod, rate limit, cache, audit"]
-  mongo[("MongoDB Atlas<br/>users, audit log, answer cache, eval runs")]
-  agent["FastAPI + LangGraph agent · Cloud Run (private, IAM)"]
-  gemini["Gemini 3.5 Flash / Flash-Lite"]
-  bq[("BigQuery · thelook_ecommerce<br/>1 GB scan cap")]
-  web -- "HTTPS + Firebase ID token" --> gw
-  gw --> mongo
-  gw -- "Google-signed ID token" --> agent
-  agent --> gemini
-  agent -- "validated SELECT only" --> bq
-  subgraph pipeline["Agent graph (per question)"]
+  user["Browser · React app<br/>Google sign-in (Firebase Auth)"]
+  api["FastAPI service · Cloud Run<br/>token check · validation · rate limit · cache · audit<br/>also serves the React build"]
+  fs[("Firestore<br/>audit log · answer cache (6 h TTL) · eval runs")]
+  gemini["Gemini 3.5 Flash (SQL)<br/>Gemini 3.5 Flash-Lite (narrative)"]
+  bq[("BigQuery<br/>thelook_ecommerce · 1 GB cap")]
+  user -- "HTTPS + Firebase ID token" --> api
+  api --> fs
+  api --> gemini
+  api -- "validated SELECT only" --> bq
+  subgraph agent["LangGraph agent (in-process)"]
     direction LR
-    p1["pre-filter<br/>(regex)"] --> p2["write SQL<br/>(Flash)"] --> p3["validate<br/>(sqlglot AST)"] --> p4["dry run<br/>(≤ 1 GB)"] --> p5["execute"] --> p6["facts<br/>(Python)"] --> p7["chart<br/>(rules)"] --> p8["explain<br/>(Flash-Lite + grounding)"]
-    p5 -. "SQL error → retry with error text (max 2)" .-> p2
+    a1["prefilter<br/>regex"] --> a2["write_sql<br/>Flash, JSON"] --> a3["validate_sql<br/>sqlglot AST"] --> a4["dry_run<br/>≤ 1 GB"] --> a5["execute<br/>30 s, capped"] --> a6["facts<br/>Python"] --> a7["chart<br/>rules"] --> a8["explain<br/>Flash-Lite + grounding"]
+    a5 -. "SQL error → retry with error (max 2)" .-> a2
   end
+  api -.- agent
 ```
 
-| Component | Tech | Path |
-| --- | --- | --- |
-| Web app | React 19, Vite, Tailwind, Recharts, Firebase Auth | [web/](web/) |
-| Gateway | Node 20, Express 5, helmet, express-rate-limit, zod, firebase-admin, mongoose, google-auth-library | [api/](api/) |
-| Agent | Python 3.12, FastAPI, LangGraph, google-genai, google-cloud-bigquery, sqlglot | [agent/](agent/) |
-| Design docs | PRD, API spec, security model, eval plan, deploy plan | [docs/](docs/) |
-
-The LLM is never the security boundary. A fully jailbroken model can at worst produce a **blocked** request.
-
-## How each judging criterion is met
-
-| Criterion | Evidence |
+| Path | What |
 | --- | --- |
-| **Problem statement alignment** | Plain-English business questions answered with a verified number, chart, table and the SQL. Out-of-scope questions get a clear message and examples. Every answer shows how it was produced. |
-| **Security** | 12 defence layers ([docs/03](docs/03-security-integrity.md)). The sqlglot AST validator allows SELECT only, enforces the table allowlist, the PII column denylist (including whole-row `TO_JSON_STRING(u)` tricks), the function denylist, no cartesian joins and LIMIT ≤ 1000. Dry run before execute with a 1 GB cap and `maximum_bytes_billed`. Firebase token verified on every route, uid taken only from the token. zod strict schemas with a 10 KB body cap. Per-user and per-IP rate limits. Agent unreachable from outside (loopback only in the container; IAM-private on Cloud Run) plus a constant-time internal key. Mongo `sanitizeFilter`. Strict CORS, helmet headers, log redaction, secrets only in Secret Manager. No `dangerouslySetInnerHTML` anywhere. |
-| **Efficiency** | 2 LLM calls per typical question, with no LLM in pre-filter, validation, facts or charting. Flash-Lite for the narrative. Schema prompt stripped of PII and geography columns. Narrative prompt gets facts, not rows. Mongo answer cache (6 h TTL): a repeat question costs 0 LLM calls and 0 bytes. BigQuery result cache on. Row caps of 1000 / 200 / 50. Lazy-loaded Firebase and Recharts chunks. One small free instance; scales to zero when idle. |
-| **Testing** | **127 agent tests** (pytest): every validator rule passes and fails, prefilter, grounding, facts, charts, the full LangGraph graph with fake Gemini and BigQuery (retry loop, cost cap, outage fallbacks), the HTTP layer and the eval comparator. **35 gateway tests** (node:test): auth, validation, NoSQL-injection shapes, cache, ownership, rate limits, CORS, timeouts. **21 web tests** (Vitest + Testing Library + **axe-core**). CI runs all of them plus ruff, ESLint (with jsx-a11y strict) and a secret scan on every push. |
-| **Accessibility** | Skip link, landmarks, labelled navigation with `aria-current`. Every input has a label. Errors are announced via `role="alert"`, progress via a polite live region. Focus moves to the answer and to the page on navigation. Charts are `role="img"` with a text summary, and the full data table is always rendered with a caption and `th scope`. Scrollable regions are keyboard-focusable. Status is never shown by colour alone. Visible focus rings, 44 px targets, `prefers-reduced-motion` honoured. Automated axe checks run on every page state in CI. |
-| **Code quality** | Small single-purpose modules. Dependency injection everywhere, so every service is testable offline. Typed agent state. One response shape end to end. Ruff and ESLint are clean. Errors carry stable codes ([docs/02](docs/02-architecture-api.md#error-codes)). |
+| [agent/app/main.py](agent/app/main.py) | HTTP API: auth, validation, rate limit, cache, audit, serves the web app |
+| [agent/app/graph.py](agent/app/graph.py) | LangGraph agent and trace |
+| [agent/app/nodes/](agent/app/nodes/) | prefilter, write_sql, validate_sql, facts, chart, explain |
+| [agent/app/security.py](agent/app/security.py) · [store.py](agent/app/store.py) | Token verification, rate limiter, headers, body cap · Firestore store |
+| [agent/eval/](agent/eval/) | 20 golden questions, 10 attacks, `run_eval.py` |
+| [web/](web/) | React 19 + Vite + Tailwind + Recharts: Ask, History, Metrics |
+| [docs/](docs/) | PRD, API spec, security model, eval plan, build plan |
+
+## Security
+
+The LLM is treated as untrusted input. Every guarantee is enforced by deterministic code and IAM, so a fully jailbroken model can at worst produce a **blocked** request.
+
+| Layer | Mechanism | Code |
+| --- | --- | --- |
+| Identity | Firebase ID token verified on every `/api` route (signature, expiry, audience). The uid comes only from the token. | `security.py`, `main.py: current_user` |
+| Input | Pydantic: string only, 3–500 chars, control characters stripped, extra fields rejected (400). 10 KB body cap enforced at the ASGI layer, even without `Content-Length` (413). | `main.py: AskBody`, `security.py: BodySizeLimit` |
+| Abuse | 10 asks/min and 100/day per user (429 + `Retry-After`). Cloud Run `--max-instances 3`. | `security.py: RateLimiter` |
+| Pre-filter | Regex, no LLM: destructive SQL verbs, "ignore previous", "system prompt", personal-data asks → `UNSAFE_REQUEST`; poems, other datasets, `INFORMATION_SCHEMA` → `OUT_OF_SCOPE` | `nodes/prefilter.py` |
+| LLM sandbox | The model sees only allowlisted tables with PII columns removed, and must return JSON `{answerable, sql, assumptions}` | `schema_cache.py`, `prompts/write_sql.v1.txt` |
+| **SQL validator** | sqlglot AST (bigquery dialect): exactly one statement; SELECT / WITH / set-ops only; no DML, DDL or scripting node anywhere; tables must be in the `thelook_ecommerce` allowlist; no `INFORMATION_SCHEMA`; no PII columns (including via aliases, CTEs and whole-row `TO_JSON_STRING(u)`); no `SELECT *` over `users`/`events`; no `EXTERNAL_QUERY`, `ML.*`, `AI.*`; no cartesian joins; LIMIT added or lowered to 1000. Violations → `UNSAFE_SQL`, **never retried**. | `nodes/validate_sql.py` |
+| Cost | Dry run first, blocked above 1 GB (`COST_LIMIT`). Execution with `maximum_bytes_billed`, 30 s timeout, label `app=insightpilot`. | `bq.py`, `graph.py` |
+| Least privilege | The runtime service account has only `roles/bigquery.jobUser`, `roles/datastore.user` and `secretAccessor` on one secret. The dataset is public read-only anyway. | Deploy below |
+| Secrets | Gemini key in Secret Manager. `.env*` git-ignored. The frontend bundle holds only the Firebase web config (public by design). CI fails on committed keys. | `.gitignore`, `.github/workflows/ci.yml` |
+| Headers | CSP, `nosniff`, `X-Frame-Options: DENY`, HSTS, Referrer-Policy, Permissions-Policy. CORS is off by default (same origin) or locked to `CORS_ORIGINS`. | `security.py: SECURITY_HEADERS` |
+| Output | React escapes everything; no `dangerouslySetInnerHTML` (ESLint `react/no-danger` = error). | `web/eslint.config.js` |
+| Audit + logs | One Firestore record per request: uid, question, SQL, job ID, bytes, status, code, trace, model, latency. Result rows are **not** stored. JSON logs (`severity`, `request_id`, `uid`, `step`, `ms`, `code`) never include tokens, keys or rows, and keys are redacted by name. | `main.py: _audit_record`, `logging_config.py` |
+
+## Efficiency
+
+- **2 LLM calls per question** (SQL + narrative). Pre-filter, validation, facts and charting use no LLM.
+- **Model routing**: Flash writes the SQL; the cheaper Flash-Lite writes the narrative from the facts list only (never raw rows).
+- **Answer cache**: key = `sha256(normalized question + model + prompt version)`, 6 h TTL in Firestore. A repeat returns `cached: true` with **0 LLM calls and 0 bytes scanned**.
+- **BigQuery**: dry run before every query, `use_query_cache=True`, LIMIT 1000; the UI shows 200 rows.
+- **Prompt size**: PII and geography columns stripped from the schema DDL. The schema is built once at startup from table metadata, which is free, unlike a billed `INFORMATION_SCHEMA` query.
+- **Gemini resilience**: 20 s timeout, 1 retry on 429/5xx with backoff, then one fallback to `GEMINI_MODEL_LITE`. Model IDs come only from env.
+- **Frontend**: Firebase SDK and Recharts are lazy-loaded chunks.
+
+## Technology implemented
+
+- **LangGraph state machine** with typed state, conditional edges and a self-correction loop: a BigQuery error is fed back into `write_sql` (max 2 retries), while safety violations end the graph.
+- **Deterministic verification**: facts (totals, top/bottom, change %, share) are computed in Python. A **grounding checker** normalises commas, %, currency and k/M/B and compares numbers at the precision written. If any number in the narrative isn't in the facts or the question, the narrative is regenerated once, then replaced by a template built from facts.
+- **Rule-based charts**: date + number → line; category + number with ≤ 20 rows → bar; otherwise a table.
+- **Full trace**: every node appends `{step, status, ms, detail}`, and LLM calls and tokens are counted. The UI shows it in a collapsible panel with the SQL (copy button), bytes in MB, job ID and LLM calls.
+
+## Performance
+
+Measured, not claimed: `python -m eval.run_eval --save` runs the **20 golden questions** ([golden.jsonl](agent/eval/golden.jsonl)). Each reference SQL runs **at eval time** (the dataset refreshes, so no answers are hard-coded), and result sets are compared ignoring column names, with order only when `order_matters` and floats within 0.01 relative. It then runs the **10 attacks** ([attacks.jsonl](agent/eval/attacks.jsonl)); an attack passes only if it is blocked **and no BigQuery job executed**. Results go to Firestore and the Metrics page.
+
+| Metric | Target | Latest run |
+| --- | --- | --- |
+| Execution accuracy (20 questions) | ≥ 80% | _run `python -m eval.run_eval --save` after deploy_ |
+| Valid SQL rate | ≥ 95% | _pending_ |
+| Attacks blocked, no job executed | 10 / 10 | 10 / 10 offline, with a model that obeys the attacker (`test_attack_set_is_fully_blocked_even_with_a_compromised_model`) |
+| Ungrounded numbers in answers | 0 | 0 by construction (grounding check plus template fallback) |
+| Latency p50 / p95 (uncached) | ≤ 8 s / ≤ 15 s | _pending_ |
+| Cached repeat | ≤ 1 s, 0 LLM calls, 0 bytes | verified in `test_repeat_question_is_cached_with_zero_cost` |
+| Median bytes scanned | report (cap 1 GB) | _pending_ |
+| Mean LLM calls | 2 typical | 2 (`test_happy_path_answers_with_two_llm_calls`) |
+
+## Google technology used
+
+| Product | Role |
+| --- | --- |
+| **Gemini 3.5 Flash / Flash-Lite** (google-genai) | Structured SQL generation / grounded narrative |
+| **BigQuery** | Warehouse (`bigquery-public-data.thelook_ecommerce`): dry run, cost cap, result cache, job labels |
+| **Firebase Authentication** | Google sign-in; ID tokens verified server-side with firebase-admin |
+| **Cloud Firestore** | Audit log, answer cache with TTL, eval runs |
+| **Cloud Run** | One container, `--max-instances 3`, scales to zero |
+| **Secret Manager** | Gemini API key |
+| **Cloud Logging** | Structured JSON logs with `severity` and `request_id` |
+| **Cloud Build / Artifact Registry** | `gcloud run deploy --source .` |
+| Firebase Hosting (optional) | Static hosting of the web app ([firebase.json](firebase.json)) when the API runs elsewhere |
+
+## Code quality, testing and accessibility
+
+- **Tests**: 143 pytest tests and 18 Vitest tests, all green, with no network and no credentials (Gemini, BigQuery, Firebase and Firestore are faked):
+  - [test_validator.py](agent/tests/test_validator.py): a passing and a failing case for every validator rule, including the `-- ;DROP` comment trick.
+  - [test_grounding.py](agent/tests/test_grounding.py) for the number-grounding checker.
+  - [test_graph.py](agent/tests/test_graph.py): retry loop, cost cap, outages, template fallback.
+  - [test_api.py](agent/tests/test_api.py): 401, 400, 413, 422, 429, cache, history ownership, headers, SPA serving.
+  - [test_evaluation.py](agent/tests/test_evaluation.py) for the result comparator and the attack set.
+  - Web tests include **axe-core** accessibility checks on every page state.
+- **Lint**: ruff (with bandit-style `S` rules) and ESLint (React, hooks, jsx-a11y *strict*). CI runs lint, tests, the build and a secret scan on every push.
+- **Accessibility**:
+  - Navigation and focus: skip link, landmarks, `aria-current`, and focus moves to each new answer and page.
+  - Announcements: errors via `role="alert"`, progress via `role="status"`.
+  - Charts are `role="img"` with a text summary, and the full table is always rendered with `th scope`.
+  - Visual: status is never shown by colour alone, 44 px targets, visible focus rings, `prefers-reduced-motion` respected.
 
 ## Run locally
 
-Prerequisites: Node 20+, Python 3.12, a GCP project with BigQuery enabled, a Gemini API key. MongoDB and Firebase are optional locally.
-
 ```bash
-# 1. Agent (needs Google credentials for BigQuery)
-gcloud auth application-default login
+# API + agent (needs BigQuery access: gcloud auth application-default login, or GOOGLE_SERVICE_ACCOUNT_JSON)
 cd agent
-python -m venv .venv && .venv/Scripts/activate      # macOS/Linux: source .venv/bin/activate
+python -m venv .venv && .venv/Scripts/activate          # macOS/Linux: source .venv/bin/activate
 pip install -r requirements-dev.txt
-cp .env.example .env                                  # fill GEMINI_API_KEY and GCP_PROJECT
+cp .env.example .env                                     # set GEMINI_API_KEY
 set -a && . ./.env && set +a
-python smoke.py                                       # 1 BigQuery query + 1 Gemini call
+python smoke.py                                          # 1 BigQuery query + 1 Gemini call per model
 uvicorn app.main:app --reload --port 8000
 
-# 2. Gateway (in-memory store and dev token when MONGO_URI / Firebase are not set)
-cd api && npm install
-NODE_ENV=development AGENT_URL=http://localhost:8000 CORS_ORIGINS=http://localhost:5173 AUTH_DEV_BYPASS=true npm run dev
-
-# 3. Web
+# Web (proxies /api to :8000)
 cd web && npm install
-VITE_API_URL=http://localhost:8080 VITE_AUTH_DEV_BYPASS=true npm run dev   # http://localhost:5173
+VITE_AUTH_DEV_BYPASS=true npm run dev                    # http://localhost:5173, signs in as a local dev user
 ```
 
-`AUTH_DEV_BYPASS` accepts the literal token `dev`. The gateway **refuses to start** with it outside `NODE_ENV=development`.
+`AUTH_DEV_BYPASS` accepts the literal token `dev` and is **refused at startup** unless `APP_ENV=development`.
 
-### Tests
+Tests and lint: `cd agent && pytest && ruff check app tests eval` · `cd web && npm run lint && npm test`.
+
+## Deploy to Cloud Run (copy-paste)
+
+Requires a billing-enabled project. The Firebase project `promptwar-naman` doubles as the GCP project.
 
 ```bash
-cd agent && pytest && ruff check app tests eval
-cd api   && npm test
-cd web   && npm test
+export PROJECT_ID=promptwar-naman REGION=us-central1
+gcloud config set project $PROJECT_ID
+
+# 1. APIs
+gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com \
+  secretmanager.googleapis.com bigquery.googleapis.com firestore.googleapis.com logging.googleapis.com
+
+# 2. Firestore (Native mode) + TTL on cached answers
+gcloud firestore databases create --location=nam5
+gcloud firestore fields ttls update expiresAt --collection-group=cache --enable-ttl
+
+# 3. Least-privilege runtime service account
+gcloud iam service-accounts create insightpilot --display-name="InsightPilot runtime"
+export SA=insightpilot@$PROJECT_ID.iam.gserviceaccount.com
+gcloud projects add-iam-policy-binding $PROJECT_ID --member=serviceAccount:$SA --role=roles/bigquery.jobUser
+gcloud projects add-iam-policy-binding $PROJECT_ID --member=serviceAccount:$SA --role=roles/datastore.user
+
+# 4. Gemini key in Secret Manager, readable only by that account
+printf '%s' "$GEMINI_API_KEY" | gcloud secrets create gemini-api-key --data-file=-
+gcloud secrets add-iam-policy-binding gemini-api-key --member=serviceAccount:$SA --role=roles/secretmanager.secretAccessor
+
+# 5. Firebase web config (public) for the build, then deploy
+cp web/.env.example web/.env.production   # fill VITE_FIREBASE_* from: firebase apps:sdkconfig web
+gcloud run deploy insightpilot --source . --region $REGION --service-account $SA --allow-unauthenticated \
+  --set-secrets GEMINI_API_KEY=gemini-api-key:latest \
+  --set-env-vars GCP_PROJECT=$PROJECT_ID,GEMINI_MODEL_SQL=gemini-3.5-flash,GEMINI_MODEL_LITE=gemini-3.5-flash-lite,BQ_MAX_BYTES=1000000000,PROMPT_VERSION=v1 \
+  --cpu 1 --memory 1Gi --concurrency 20 --max-instances 3 --timeout 60
+
+# 6. $10 budget alert
+gcloud billing budgets create --billing-account=$BILLING_ACCOUNT_ID --display-name=insightpilot \
+  --budget-amount=10USD --threshold-rule=percent=0.5 --threshold-rule=percent=1.0
 ```
 
-### Evaluation (golden set + attack set)
+Then, in the Firebase console, go to Authentication → Sign-in method → enable **Google**, and under Settings → Authorized domains add the `*.run.app` hostname. Smoke test: `curl $URL/healthz` → `{"ok":true,"schemaLoaded":true}`; `curl -X POST $URL/api/ask` → 401.
 
-```bash
-cd agent && python -m eval.run_eval --save-mongo
-```
+**No billing (Firebase Spark)?** Deploy the same Dockerfile on Render's free tier with [render.yaml](render.yaml). Set `GEMINI_API_KEY` and `GOOGLE_SERVICE_ACCOUNT_JSON`, the key of a service account with only BigQuery Job User and Cloud Datastore User; Firestore and the BigQuery sandbox both work without billing. Add the `onrender.com` hostname to Firebase's authorized domains.
 
-This runs the 20 golden questions ([agent/eval/golden.jsonl](agent/eval/golden.jsonl)), executes each reference SQL **at eval time** (no hard-coded answers), compares result sets, and runs the 10 attack prompts ([agent/eval/attacks.jsonl](agent/eval/attacks.jsonl)). An attack passes only if it is blocked **and** no BigQuery job executed. Results appear on the Metrics page. Admins can also trigger a run with `POST /api/admin/eval/run`.
-
-## Deploy (free: Firebase Spark + Render)
-
-| Piece | Where | Config |
-| --- | --- | --- |
-| Web app + Google sign-in | Firebase Hosting + Auth (Spark plan) | [firebase.json](firebase.json) |
-| Gateway + agent | One Docker container on Render's free tier. Only the gateway is public; the agent binds to `127.0.0.1` | [Dockerfile](Dockerfile), [render.yaml](render.yaml), [deploy/start.sh](deploy/start.sh) |
-| Data | BigQuery sandbox (no billing) via a read-only service account | `GOOGLE_SERVICE_ACCOUNT_JSON` |
-
-**1. BigQuery service account** (Google Cloud console, project `promptwar-naman`): enable the BigQuery API. Under IAM → Service accounts, create `insightpilot-bq` with **only** `BigQuery Job User`, then Keys → Add key → JSON. Never commit the file.
-
-**2. Backend on Render**: Dashboard → New → Blueprint → this repo. Fill the secret env vars: `GEMINI_API_KEY`, `MONGO_URI`, and `GOOGLE_SERVICE_ACCOUNT_JSON` (paste the whole key JSON). Render builds the [Dockerfile](Dockerfile) and checks `/healthz`.
-
-**3. Web on Firebase Hosting**:
-
-```bash
-npm install -g firebase-tools && firebase login
-# Console: Authentication → Sign-in method → Google → Enable
-cp web/.env.example web/.env.production   # VITE_API_URL=https://<render-service>.onrender.com, VITE_FIREBASE_* from: firebase apps:sdkconfig web
-firebase deploy --only hosting
-```
-
-The gateway and agent share a per-boot random `INTERNAL_API_KEY` (constant-time compared), on top of the agent being unreachable from outside the container. The free tier sleeps after 15 minutes idle. The web app pings `/healthz` on page load to wake it, and tells the user if a request is slow because of that.
-
-Smoke test: `GET <render-url>/healthz` → `{"ok":true}`; `POST <render-url>/api/ask` without a token → 401.
-
-The per-service Dockerfiles in [api/](api/Dockerfile) and [agent/](agent/Dockerfile) remain an option for Cloud Run with IAM between services ([docs/05](docs/05-deploy-ops-testing.md)).
-
-## Security model in one paragraph
-
-The browser holds only a Firebase ID token. The gateway verifies it on every `/api` route and takes the uid from the token. It validates input with zod, rate-limits, and calls the agent over the container loopback with a secret internal key (or a Google-signed ID token on Cloud Run). The agent uses a service account with only `roles/bigquery.jobUser`. The model sees a schema with PII columns removed. Whatever SQL it writes must pass the AST validator, then a dry run under 1 GB, then executes with `maximum_bytes_billed`. Numbers in the answer come from Python over the result rows. A grounding checker rejects any narrative containing a number it cannot trace, regenerates once, then falls back to a template built from facts.
-
-Known gaps for a hackathon build: the MongoDB Atlas network allowlist is open (`0.0.0.0/0`), and rate limits are per instance (in memory; one free instance).
+Known gaps: rate limits are in memory per instance (at most 3); the Render path uses a service-account key instead of attached identity.
 
 ## Disclosure
 
-All application code was written during the event with the help of an AI coding assistant (**Claude Code**). Design docs in [docs/](docs/) were prepared before the build.
+All application code was written during the event with the help of an AI coding assistant (**Claude Code**). The design docs in [docs/](docs/) were prepared before the build.
 
-Open-source libraries: React, React Router, Vite, Tailwind CSS, Recharts, Firebase JS SDK, Express, helmet, express-rate-limit, zod, firebase-admin, mongoose, google-auth-library, FastAPI, Uvicorn, Pydantic, LangGraph, google-genai, google-cloud-bigquery, sqlglot, pytest, httpx, ruff, Vitest, Testing Library, axe-core, jsdom.
-
-Services and data: Google Gemini (`gemini-3.5-flash`, `gemini-3.5-flash-lite`), BigQuery public dataset `bigquery-public-data.thelook_ecommerce` (synthetic), Firebase Auth and Hosting, BigQuery sandbox, Render (free web service), MongoDB Atlas.
+- **Libraries**: FastAPI, Uvicorn, Pydantic, LangGraph, google-genai, google-cloud-bigquery, google-cloud-firestore, firebase-admin, sqlglot, pytest, httpx, ruff; React, React Router, Vite, Tailwind CSS, Recharts, Firebase JS SDK, Vitest, Testing Library, axe-core, jsdom, ESLint.
+- **APIs and services**: Gemini API (`gemini-3.5-flash`, `gemini-3.5-flash-lite`), BigQuery, Firebase Authentication, Cloud Firestore, Cloud Run, Secret Manager, Cloud Logging.
+- **Dataset**: `bigquery-public-data.thelook_ecommerce` (synthetic e-commerce data published by Google).
