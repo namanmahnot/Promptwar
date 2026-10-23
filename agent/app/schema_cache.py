@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 
 from app.bq import Warehouse
 from app.config import ALLOWED_TABLES, DATASET, PII_COLUMNS
@@ -30,7 +31,11 @@ class SchemaCache:
         return self.ddl is not None
 
     def load(self, warehouse: Warehouse) -> None:
-        tables = {name: warehouse.table_schema(f"{DATASET}.{name}") for name in sorted(ALLOWED_TABLES)}
+        names = sorted(ALLOWED_TABLES)
+        # Seven independent metadata lookups: fetch them in parallel to keep cold starts short.
+        with ThreadPoolExecutor(max_workers=len(names)) as pool:
+            schemas = pool.map(lambda name: warehouse.table_schema(f"{DATASET}.{name}"), names)
+        tables = dict(zip(names, schemas, strict=True))
         self.ddl = build_ddl(tables)
         log.info("schema cache loaded", extra={"tables": len(tables)})
 

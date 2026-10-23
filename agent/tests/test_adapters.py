@@ -18,8 +18,8 @@ from app.store import FirestoreStore, MemoryStore, cache_key, normalize_question
 
 
 class ApiFailure(Exception):
-    def __init__(self, code):
-        super().__init__(f"HTTP {code}")
+    def __init__(self, code, detail=""):
+        super().__init__(f"HTTP {code} {detail}")
         self.code = code
 
 
@@ -44,6 +44,7 @@ def gemini(outcomes, monkeypatch):
     client = object.__new__(GeminiLlm)
     client._types = types
     client._fallback_model = "lite"
+    client._cooldown_until = {}
     client._client = SimpleNamespace(models=FakeModels(outcomes))
     return client
 
@@ -77,6 +78,19 @@ def test_gemini_does_not_retry_client_errors(monkeypatch):
     with pytest.raises(LlmUnavailable):
         client.generate("p", model="flash")
     assert client._client.models.models == ["flash"]
+
+
+def test_exhausted_daily_quota_skips_model_without_waiting(monkeypatch):
+    sleeps = []
+    client = gemini([ApiFailure(429, "'retryDelay': '76652s'"), "from lite", "lite again"], monkeypatch)
+    monkeypatch.setattr(llm_module.time, "sleep", sleeps.append)
+
+    first = client.generate("p", model="flash")
+    second = client.generate("p", model="flash")
+
+    assert (first.model, second.model) == ("lite", "lite")
+    assert client._client.models.models == ["flash", "lite", "lite"]  # flash tried once, then skipped
+    assert sleeps == []  # never waits on a quota that resets tomorrow
 
 
 def test_backoff_honours_retry_delay_and_caps_it():

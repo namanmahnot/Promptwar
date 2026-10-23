@@ -65,7 +65,7 @@ The LLM is treated as untrusted input. Every guarantee is enforced by determinis
 - **Answer cache**: key = `sha256(normalized question + model + prompt version)`, 6 h TTL in Firestore. A repeat returns `cached: true` with **0 LLM calls and 0 bytes scanned**.
 - **BigQuery**: dry run before every query, `use_query_cache=True`, LIMIT 1000; the UI shows 200 rows.
 - **Prompt size**: PII and geography columns stripped from the schema DDL. The schema is built once at startup from table metadata, which is free, unlike a billed `INFORMATION_SCHEMA` query.
-- **Gemini resilience**: 20 s timeout, 1 retry on 429/5xx with backoff, then one fallback to `GEMINI_MODEL_LITE`. Model IDs come only from env.
+- **Gemini resilience**: 20 s timeout; 1 retry on 429/5xx honouring the server's `retryDelay` (capped at 12 s); then the `GEMINI_MODEL_LITE` fallback. A quota circuit breaker skips a model whose quota resets later than the cap. Model IDs come only from env.
 - **Transport**: gzip for responses over 1 KB; Vite-fingerprinted assets served with `Cache-Control: immutable` for one year.
 - **Frontend**: Firebase SDK and Recharts are lazy-loaded chunks.
 
@@ -80,16 +80,18 @@ The LLM is treated as untrusted input. Every guarantee is enforced by determinis
 
 Measured, not claimed: `python -m eval.run_eval --save` runs the **20 golden questions** ([golden.jsonl](agent/eval/golden.jsonl)). Each reference SQL runs **at eval time** (the dataset refreshes, so no answers are hard-coded), and result sets are compared ignoring column names, with order only when `order_matters` and floats within 0.01 relative. It then runs the **10 attacks** ([attacks.jsonl](agent/eval/attacks.jsonl)); an attack passes only if it is blocked **and no BigQuery job executed**. Results go to Firestore and the Metrics page.
 
-| Metric | Target | Latest run |
+| Metric | Target | Latest run (live Gemini + BigQuery, 23 Oct 2026) |
 | --- | --- | --- |
-| Execution accuracy (20 questions) | ≥ 80% | _run `python -m eval.run_eval --save` after deploy_ |
-| Valid SQL rate | ≥ 95% | _pending_ |
-| Attacks blocked, no job executed | 10 / 10 | 10 / 10 offline, with a model that obeys the attacker (`test_attack_set_is_fully_blocked_even_with_a_compromised_model`) |
-| Ungrounded numbers in answers | 0 | 0 by construction (grounding check plus template fallback) |
-| Latency p50 / p95 (uncached) | ≤ 8 s / ≤ 15 s | _pending_ |
-| Cached repeat | ≤ 1 s, 0 LLM calls, 0 bytes | verified in `test_repeat_question_is_cached_with_zero_cost` |
-| Median bytes scanned | report (cap 1 GB) | _pending_ |
-| Mean LLM calls | 2 typical | 2 (`test_happy_path_answers_with_two_llm_calls`) |
+| Execution accuracy (20 questions) | ≥ 80% | **100%** (20 / 20) |
+| Valid SQL rate | ≥ 95% | **100%** |
+| Attacks blocked, no job executed | 10 / 10 | **10 / 10**, and also 10 / 10 offline with a model that obeys the attacker |
+| Ungrounded numbers in answers | 0 | **0** |
+| Mean LLM calls per question | 2 typical | **2.05** |
+| Median bytes scanned | report (cap 1 GB) | **1.7 MB** |
+| End-to-end latency (uncached) | ≤ 8 s | **4–5 s** measured after the quota fix below |
+| Cached repeat | 0 LLM calls, 0 bytes | verified in `test_repeat_question_is_cached_with_zero_cost` |
+
+The eval run itself recorded p50 31 s because the free-tier daily Gemini quota ran out mid-run and each question waited on retries. The LLM client now has a **quota circuit breaker**: when Gemini reports that a model's quota resets later than the 12 s wait cap, that model is skipped until the reset and requests go straight to the fallback model. An exhausted daily quota now costs one fast 429 instead of about 25 s of waiting (`test_exhausted_daily_quota_skips_model_without_waiting`).
 
 ## Google technology used
 
@@ -107,7 +109,7 @@ Measured, not claimed: `python -m eval.run_eval --save` runs the **20 golden que
 
 ## Code quality, testing and accessibility
 
-- **Tests**: **173 pytest tests (93% coverage, ≥ 90% enforced)** and **27 Vitest tests (88% statements / 94% lines, thresholds enforced)**, all green, with no network and no credentials (Gemini, BigQuery, Firebase and Firestore are faked):
+- **Tests**: **175 pytest tests (93% coverage, ≥ 90% enforced)** and **27 Vitest tests (88% statements / 94% lines, thresholds enforced)**, all green, with no network and no credentials (Gemini, BigQuery, Firebase and Firestore are faked):
   - [test_validator.py](agent/tests/test_validator.py): a passing and a failing case for every validator rule, including the `-- ;DROP` comment trick.
   - [test_grounding.py](agent/tests/test_grounding.py) for the number-grounding checker.
   - [test_graph.py](agent/tests/test_graph.py): retry loop, cost cap, outages, template fallback.

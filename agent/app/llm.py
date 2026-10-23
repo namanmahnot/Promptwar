@@ -42,23 +42,35 @@ class GeminiLlm:
         # Reads GEMINI_API_KEY, or GOOGLE_GENAI_USE_VERTEXAI + project/location for Vertex AI.
         self._client = genai.Client(http_options=types.HttpOptions(timeout=TIMEOUT_MS))
         self._fallback_model = fallback_model
+        self._cooldown_until: dict[str, float] = {}  # model -> monotonic time its quota resets
 
     def generate(self, prompt: str, *, model: str, json_schema: dict | None = None) -> LlmResult:
-        # On throttling/outage, retry the same model once, then drop to the cheaper fallback
-        # (which carries its own quota), backing off by the server's retryDelay when given.
+        # Retry the same model once after a short backoff, then switch straight to the cheaper
+        # fallback (its own quota). A model whose quota won't reset within MAX_BACKOFF_S is skipped
+        # entirely until then, so an exhausted daily quota costs one fast 429, not two long waits.
         attempts = [model, model] + ([self._fallback_model] if self._fallback_model != model else [])
         last_error: Exception | None = None
+        previous: str | None = None
         for index, attempt_model in enumerate(attempts):
-            if index:
+            if self._cooling_down(attempt_model):
+                continue
+            if attempt_model == previous and last_error is not None:
                 time.sleep(_backoff_seconds(last_error, index))
+            previous = attempt_model
             try:
                 return self._call(prompt, attempt_model, json_schema)
             except Exception as err:  # noqa: BLE001 — classified below
                 if not _is_retryable(err):
                     raise LlmUnavailable(_describe(err)) from err
                 last_error = err
+                delay = _retry_delay(err)
+                if delay is not None and delay > MAX_BACKOFF_S:
+                    self._cooldown_until[attempt_model] = time.monotonic() + delay
                 log.warning("gemini call failed", extra={"model": attempt_model, "error": _describe(err)})
         raise LlmUnavailable(_describe(last_error)) from last_error
+
+    def _cooling_down(self, model: str) -> bool:
+        return time.monotonic() < self._cooldown_until.get(model, 0.0)
 
     def _call(self, prompt: str, model: str, json_schema: dict | None) -> LlmResult:
         config = self._types.GenerateContentConfig(
@@ -83,10 +95,17 @@ def _is_retryable(err: Exception) -> bool:
     return isinstance(err, TimeoutError | ConnectionError) or "timeout" in type(err).__name__.lower()
 
 
+def _retry_delay(err: Exception | None) -> float | None:
+    """The server's suggested wait (RetryInfo.retryDelay) on a 429, if it sent one."""
+    match = _RETRY_DELAY.search(str(err)) if err is not None else None
+    return float(match.group(1)) if match else None
+
+
 def _backoff_seconds(err: Exception | None, attempt: int) -> float:
     """Honour the server's retryDelay on 429 when present; otherwise back off exponentially (1 s, 4 s)."""
-    match = _RETRY_DELAY.search(str(err)) if err is not None else None
-    delay = float(match.group(1)) if match else RETRY_BACKOFF_S * 4 ** (attempt - 1)
+    delay = _retry_delay(err)
+    if delay is None:
+        delay = RETRY_BACKOFF_S * 4 ** (attempt - 1)
     return min(delay, MAX_BACKOFF_S)
 
 
