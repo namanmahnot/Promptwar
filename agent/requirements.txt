@@ -1,0 +1,7 @@
+fastapi==0.161.1
+uvicorn[standard]==0.54.0
+langgraph==1.2.16
+google-genai==2.33.0
+google-cloud-bigquery==3.46.2
+sqlglot==30.24.0
+pydantic==2.14.1

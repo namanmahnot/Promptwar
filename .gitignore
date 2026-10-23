@@ -1,0 +1,25 @@
+# dependencies and builds
+node_modules/
+dist/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# secrets — never commit
+.env
+.env.*
+!.env.example
+*.pem
+*-key.json
+service-account*.json
+
+# local artefacts
+agent/eval/latest.json
+.firebase/
+*.log
+insightpilot-docs.zip
+.DS_Store
+.vscode/
+.claude/

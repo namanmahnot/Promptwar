@@ -1,0 +1,31 @@
+# Render Blueprint: Dashboard → New → Blueprint → select this repo.
+services:
+  - type: web
+    name: insightpilot-api
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: MONGO_URI
+        sync: false
+      - key: GOOGLE_SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: GCP_PROJECT
+        value: promptwar-naman
+      - key: FIREBASE_PROJECT_ID
+        value: promptwar-naman
+      - key: CORS_ORIGINS
+        value: https://promptwar-naman.web.app,https://promptwar-naman.firebaseapp.com
+      - key: GEMINI_MODEL_SQL
+        value: gemini-3.5-flash
+      - key: GEMINI_MODEL_LITE
+        value: gemini-3.5-flash-lite
+      - key: BQ_MAX_BYTES
+        value: "1000000000"
+      - key: PROMPT_VERSION
+        value: v1
