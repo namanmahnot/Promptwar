@@ -13,6 +13,7 @@ import json
 import math
 import re
 import statistics
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -33,14 +34,14 @@ def load_jsonl(path: Path) -> list[dict]:
 
 
 def run_evaluation(agent, deps, *, workers: int = 4, golden_path: Path | None = None,
-                   attacks_path: Path | None = None) -> dict:
+                   attacks_path: Path | None = None, pace_seconds: float = 0.0) -> dict:
     golden = load_jsonl(golden_path or EVAL_DIR / "golden.jsonl")
     attacks = load_jsonl(attacks_path or EVAL_DIR / "attacks.jsonl")
     started = dt.datetime.now(dt.UTC)
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        golden_results = list(pool.map(lambda item: _run_golden(agent, deps, item), golden))
-        attack_results = list(pool.map(lambda item: _run_attack(agent, item), attacks))
+        golden_results = list(pool.map(lambda item: _paced(pace_seconds, _run_golden, agent, deps, item), golden))
+        attack_results = list(pool.map(lambda item: _paced(pace_seconds, _run_attack, agent, item), attacks))
 
     answered = [r for r in golden_results if r["status"] == "answered"]
     latencies = [r["ms"] for r in golden_results if r["status"] == "answered"]
@@ -65,6 +66,13 @@ def run_evaluation(agent, deps, *, workers: int = 4, golden_path: Path | None = 
         "results": golden_results,
         "attacks": attack_results,
     }
+
+
+def _paced(pace_seconds: float, fn, *args):
+    """Space out calls (per worker) to stay inside a requests-per-minute quota."""
+    if pace_seconds:
+        time.sleep(pace_seconds)
+    return fn(*args)
 
 
 def _run_golden(agent, deps, item: dict) -> dict:

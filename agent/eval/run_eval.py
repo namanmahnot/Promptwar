@@ -22,6 +22,7 @@ OUT = Path(__file__).with_name("latest.json")
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument("--pace", type=float, default=0.0, help="seconds between calls per worker (free-tier quota)")
     parser.add_argument("--save", action="store_true", help="write the summary to Firestore")
     args = parser.parse_args()
 
@@ -30,7 +31,7 @@ def main() -> int:
         print("Schema did not load; check BigQuery credentials (gcloud auth application-default login).")
         return 2
 
-    summary = run_evaluation(Agent(deps), deps, workers=args.workers)
+    summary = run_evaluation(Agent(deps), deps, workers=args.workers, pace_seconds=args.pace)
     OUT.write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
     print(f"Execution accuracy : {summary['executionAccuracy']:.0%}  ({summary['n']} questions)")

@@ -1,7 +1,7 @@
 # Free alternative to Cloud Run (no billing): Render → New → Blueprint → this repo.
 services:
   - type: web
-    name: insightpilot
+    name: insightpilot-promptwar
     runtime: docker
     plan: free
     region: oregon
@@ -12,6 +12,10 @@ services:
         sync: false
       - key: GOOGLE_SERVICE_ACCOUNT_JSON
         sync: false
+      - key: CORS_ORIGINS
+        value: https://promptwar-naman.web.app,https://promptwar-naman.firebaseapp.com
+      - key: STORE
+        value: firestore
       - key: GCP_PROJECT
         value: promptwar-naman
       - key: GEMINI_MODEL_SQL

@@ -218,7 +218,8 @@ def test_large_responses_are_gzip_compressed(ctx):
     assert res.headers.get("Content-Encoding") == "gzip"
 
 
-def test_eval_latest_returns_the_saved_run(ctx):
+def test_eval_latest_returns_the_saved_run(ctx, monkeypatch):
+    monkeypatch.setattr("app.main._bundled_eval", lambda: None)  # ignore a local eval/latest.json
     client, store, _ = ctx
     auth = {"Authorization": "Bearer token-alice"}
     assert client.get("/api/metrics/eval/latest", headers=auth).json() == {"run": None}

@@ -31,6 +31,9 @@ def cache_key(question: str, model: str, prompt_version: str) -> str:
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
+_TIMEOUT = 15  # seconds; tolerant of Firestore cold starts. All store calls are non-fatal (see main._safely).
+
+
 def _now() -> dt.datetime:
     return dt.datetime.now(dt.UTC)
 
@@ -89,7 +92,7 @@ class FirestoreStore:
         self._db = firestore.Client(project=project, credentials=credentials)
 
     def get_cached(self, key: str) -> dict | None:
-        snapshot = self._db.collection("cache").document(key).get(timeout=5)
+        snapshot = self._db.collection("cache").document(key).get(timeout=_TIMEOUT)
         if not snapshot.exists:
             return None
         data = snapshot.to_dict() or {}
@@ -98,12 +101,13 @@ class FirestoreStore:
     def save_cached(self, key: str, response: dict, ttl_seconds: int) -> None:
         # A Firestore TTL policy on `expiresAt` deletes stale entries (see README).
         expires = _now() + dt.timedelta(seconds=ttl_seconds)
-        self._db.collection("cache").document(key).set({"response": response, "expiresAt": expires}, timeout=5)
+        self._db.collection("cache").document(key).set({"response": response, "expiresAt": expires}, timeout=_TIMEOUT)
 
     def save_query(self, record: dict) -> None:
         ref = self._db.collection("users").document(record["uid"]).collection("queries")
         # Document id = requestId, so a retried write never creates a duplicate audit row.
-        ref.document(record["requestId"]).set({**record, "createdAt": self._firestore.SERVER_TIMESTAMP}, timeout=5)
+        doc = {**record, "createdAt": self._firestore.SERVER_TIMESTAMP}
+        ref.document(record["requestId"]).set(doc, timeout=_TIMEOUT)
 
     def list_history(self, uid: str, limit: int) -> list[dict]:
         query = (
@@ -113,14 +117,14 @@ class FirestoreStore:
             .order_by("createdAt", direction=self._firestore.Query.DESCENDING)
             .limit(limit)
         )
-        return [doc.to_dict() for doc in query.stream(timeout=5)]
+        return [doc.to_dict() for doc in query.stream(timeout=_TIMEOUT)]
 
     def latest_eval(self) -> dict | None:
         query = self._db.collection("eval_runs").order_by(
             "startedAt", direction=self._firestore.Query.DESCENDING
         ).limit(1)
-        docs = list(query.stream(timeout=5))
+        docs = list(query.stream(timeout=_TIMEOUT))
         return docs[0].to_dict() if docs else None
 
     def save_eval(self, summary: dict) -> None:
-        self._db.collection("eval_runs").add(summary, timeout=10)
+        self._db.collection("eval_runs").add(summary, timeout=_TIMEOUT)

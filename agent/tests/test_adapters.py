@@ -79,6 +79,15 @@ def test_gemini_does_not_retry_client_errors(monkeypatch):
     assert client._client.models.models == ["flash"]
 
 
+def test_backoff_honours_retry_delay_and_caps_it():
+    from app.llm import MAX_BACKOFF_S, _backoff_seconds
+
+    assert _backoff_seconds(Exception("429 ... 'retryDelay': '7s' ..."), 1) == 7.0
+    assert _backoff_seconds(Exception("429 ... 'retryDelay': '58s' ..."), 1) == MAX_BACKOFF_S
+    assert _backoff_seconds(Exception("503"), 1) == 1.0
+    assert _backoff_seconds(Exception("503"), 2) == 4.0
+
+
 def test_gemini_timeouts_are_retryable(monkeypatch):
     client = gemini([TimeoutError(), "ok"], monkeypatch)
     assert client.generate("p", model="flash").text == "ok"

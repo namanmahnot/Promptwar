@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass
 from typing import Protocol
@@ -11,7 +12,9 @@ log = logging.getLogger(__name__)
 
 TIMEOUT_MS = 20_000
 RETRY_BACKOFF_S = 1.0
+MAX_BACKOFF_S = 12.0  # cap so a retry still fits the gateway's 45 s budget
 _RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+_RETRY_DELAY = re.compile(r"retry_?[Dd]elay['\"]?\s*[:=]\s*['\"]?(\d+(?:\.\d+)?)s")
 
 
 class LlmUnavailable(Exception):
@@ -41,11 +44,13 @@ class GeminiLlm:
         self._fallback_model = fallback_model
 
     def generate(self, prompt: str, *, model: str, json_schema: dict | None = None) -> LlmResult:
+        # On throttling/outage, retry the same model once, then drop to the cheaper fallback
+        # (which carries its own quota), backing off by the server's retryDelay when given.
         attempts = [model, model] + ([self._fallback_model] if self._fallback_model != model else [])
         last_error: Exception | None = None
         for index, attempt_model in enumerate(attempts):
             if index:
-                time.sleep(RETRY_BACKOFF_S)
+                time.sleep(_backoff_seconds(last_error, index))
             try:
                 return self._call(prompt, attempt_model, json_schema)
             except Exception as err:  # noqa: BLE001 — classified below
@@ -76,6 +81,13 @@ def _is_retryable(err: Exception) -> bool:
     if isinstance(code, int):
         return code in _RETRYABLE_STATUS
     return isinstance(err, TimeoutError | ConnectionError) or "timeout" in type(err).__name__.lower()
+
+
+def _backoff_seconds(err: Exception | None, attempt: int) -> float:
+    """Honour the server's retryDelay on 429 when present; otherwise back off exponentially (1 s, 4 s)."""
+    match = _RETRY_DELAY.search(str(err)) if err is not None else None
+    delay = float(match.group(1)) if match else RETRY_BACKOFF_S * 4 ** (attempt - 1)
+    return min(delay, MAX_BACKOFF_S)
 
 
 def _describe(err: Exception | None) -> str:

@@ -9,6 +9,8 @@ Rules:
 - Revenue = SUM(order_items.sale_price) WHERE order_items.status = 'Complete', unless the question says otherwise.
 - Profit = order_items.sale_price - products.cost (join on order_items.product_id = products.id).
 - A returned item has order_items.status = 'Returned'. Order statuses: Processing, Shipped, Complete, Cancelled, Returned.
+- An item "has been shipped" when order_items.shipped_at IS NOT NULL (status 'Shipped' only means currently in transit).
+- A product's distribution center is products.distribution_center_id = distribution_centers.id.
 - Use CURRENT_DATE() for relative dates ("last 90 days", "this year"). Timestamps are UTC; wrap them in DATE() when comparing to dates.
 - Give every computed column a short snake_case alias. Round money and ratios with ROUND(x, 2).
 - Put the label column first and the main measure second. Add ORDER BY for rankings and time series. LIMIT 1000 at most.

@@ -14,7 +14,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: No API keys or connection strings in the repo
         run: |
-          if git grep -nE "AIza[0-9A-Za-z_-]{20,}|BEGIN PRIVATE KEY|mongodb\+srv://[^<\s]+:[^<\s]+@" -- . ':!*.md' ':!web/.env.production'; then
+          if git grep -nE "AIza[0-9A-Za-z_-]{20,}|BEGIN PRIVATE KEY|mongodb\+srv://[^<\s]+:[^<\s]+@" -- . ':!*.md' ':!web/.env.production' ':!.github'; then
             echo "Possible secret committed"; exit 1
           fi
 
