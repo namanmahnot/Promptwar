@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from app.columns import classify
 
-MAX_BAR_CATEGORIES = 25
+MAX_BAR_CATEGORIES = 20
 
 
 def choose_chart(columns: list[dict], rows: list[dict]) -> dict:

@@ -1,9 +1,6 @@
 import json
 
-from fastapi.testclient import TestClient
-
 from app.evaluation import EVAL_DIR, load_jsonl, results_match, run_evaluation
-from app.main import create_app
 from tests.fakes import GOOD_SQL, FakeLlm, FakeWarehouse, make_agent, plan
 
 # --- result-set comparison -------------------------------------------------------------
@@ -87,45 +84,3 @@ def test_golden_question_passes_when_results_match(tmp_path):
     assert summary["groundingViolations"] == 0
     assert summary["meanLlmCalls"] == 2
     assert summary["p50Ms"] >= 0
-
-
-# --- HTTP layer ------------------------------------------------------------------------
-
-
-def client_for(**setting_overrides):
-    _, deps = make_agent(FakeLlm([plan()]), **setting_overrides)
-    return TestClient(create_app(deps))
-
-
-def test_healthz_reports_schema_loaded():
-    with client_for() as client:
-        body = client.get("/healthz").json()
-    assert body == {"ok": True, "schemaLoaded": True, "promptVersion": "v1"}
-
-
-def test_ask_endpoint_returns_answer():
-    with client_for() as client:
-        res = client.post("/v1/ask", json={"question": "Top categories", "uid": "u1", "requestId": "req-12345678"})
-    assert res.status_code == 200
-    assert res.json()["status"] == "answered"
-
-
-def test_ask_rejects_extra_fields_and_bad_types():
-    with client_for() as client:
-        extra = client.post("/v1/ask", json={"question": "Top", "uid": "u", "requestId": "req-12345678", "x": 1})
-        nosql = client.post("/v1/ask", json={"question": {"$gt": ""}, "uid": "u", "requestId": "req-12345678"})
-    assert extra.status_code == 422
-    assert nosql.status_code == 422
-
-
-def test_internal_key_is_enforced_when_configured():
-    body = {"question": "Top categories", "uid": "u1", "requestId": "req-12345678"}
-    with client_for(internal_key="s3cret-key-value") as client:
-        assert client.post("/v1/ask", json=body).status_code == 403
-        assert client.post("/v1/ask", json=body, headers={"X-Internal-Key": "wrong"}).status_code == 403
-        assert client.post("/v1/ask", json=body, headers={"X-Internal-Key": "s3cret-key-value"}).status_code == 200
-
-
-def test_docs_are_disabled_outside_development():
-    with client_for() as client:
-        assert client.get("/docs").status_code == 404

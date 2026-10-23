@@ -2,14 +2,13 @@
 
 Usage (from agent/):
     python -m eval.run_eval                 # print summary, write eval/latest.json
-    python -m eval.run_eval --save-mongo    # also insert into MongoDB `eval_runs` (needs MONGO_URI)
+    python -m eval.run_eval --save          # also write to Firestore `eval_runs` (Metrics page)
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -23,7 +22,7 @@ OUT = Path(__file__).with_name("latest.json")
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--workers", type=int, default=4)
-    parser.add_argument("--save-mongo", action="store_true")
+    parser.add_argument("--save", action="store_true", help="write the summary to Firestore")
     args = parser.parse_args()
 
     deps = _production_dependencies()
@@ -45,12 +44,16 @@ def main() -> int:
         mark = "PASS" if result["pass"] else "FAIL"
         print(f"  {mark} {result.get('qid') or result.get('id')}: {result.get('code') or result.get('status')}")
 
-    if args.save_mongo:
-        from pymongo import MongoClient
+    if args.save:
+        from google.oauth2 import service_account
 
-        with MongoClient(os.environ["MONGO_URI"], serverSelectionTimeoutMS=5000) as client:
-            client.get_default_database("insightpilot")["eval_runs"].insert_one(dict(summary))
-        print("Saved to MongoDB eval_runs.")
+        from app.main import _service_account_info
+        from app.store import FirestoreStore
+
+        info = _service_account_info()
+        credentials = service_account.Credentials.from_service_account_info(info) if info else None
+        FirestoreStore(deps.settings.gcp_project, credentials).save_eval(summary)
+        print("Saved to Firestore eval_runs.")
     return 0
 
 

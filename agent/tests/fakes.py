@@ -76,7 +76,6 @@ def settings(**overrides) -> Settings:
         "model_lite": "flash-lite",
         "max_bytes": 1_000_000_000,
         "prompt_version": "v1",
-        "internal_key": None,
         "environment": "test",
     }
     values.update(overrides)

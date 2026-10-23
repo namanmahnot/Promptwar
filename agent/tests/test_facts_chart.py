@@ -66,7 +66,7 @@ def test_integer_year_is_a_time_dimension():
 
 def test_table_for_single_row_or_too_many_categories():
     assert choose_chart(CATEGORY, [{"category": "A", "revenue": 1.0}]) == {"type": "table"}
-    many = [{"category": str(i), "revenue": float(i)} for i in range(30)]
+    many = [{"category": str(i), "revenue": float(i)} for i in range(21)]
     assert choose_chart(CATEGORY, many) == {"type": "table"}
 
 

@@ -79,7 +79,7 @@ def _timed(step: str, fn: Callable[[AgentState], NodeResult]) -> Callable[[Agent
         update["trace"] = [{"step": step, "status": status, "ms": ms, "detail": detail}]
         log.info(
             "step",
-            extra={"requestId": state.get("request_id"), "step": step, "status": status, "ms": ms},
+            extra={"request_id": state.get("request_id"), "step": step, "status": status, "ms": ms},
         )
         return update
 
@@ -252,7 +252,7 @@ class Agent:
         try:
             state = self._graph.invoke(initial)
         except Exception:
-            log.exception("agent crashed", extra={"requestId": request_id})
+            log.exception("agent crashed", extra={"request_id": request_id})
             state = {**initial, "status": "failed", "code": "INTERNAL", "message": "Unexpected error."}
         return to_response(state, self._deps.settings, round((time.perf_counter() - start) * 1000))
 
