@@ -11,7 +11,7 @@ jobs:
   secrets-scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: No API keys or connection strings in the repo
         run: |
           if git grep -nE "AIza[0-9A-Za-z_-]{20,}|BEGIN PRIVATE KEY|mongodb\+srv://[^<\s]+:[^<\s]+@" -- . ':!*.md' ':!web/.env.production' ':!.github'; then
@@ -24,7 +24,7 @@ jobs:
       run:
         working-directory: agent
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -42,7 +42,7 @@ jobs:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 22
