@@ -3,6 +3,11 @@
 const API_URL = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
 const RESULT_STATUSES = new Set(['answered', 'cached', 'blocked', 'failed']);
 
+/** Free hosting sleeps when idle: ping on page load so the server is awake by the time the user asks. */
+export function warmUpServer() {
+  fetch(`${API_URL}/healthz`).catch(() => {});
+}
+
 export class ApiError extends Error {
   constructor(status, code, message, requestId) {
     super(message);
