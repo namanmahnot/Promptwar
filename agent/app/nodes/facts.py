@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import math
 import re
+from typing import Any
 
 from app.columns import classify, humanize
 
@@ -34,11 +35,11 @@ def compute_facts(columns: list[dict], rows: list[dict]) -> list[dict]:
 
     measure = roles.measures[0]["name"]
     dimension = roles.dimensions[0]["name"] if roles.dimensions else None
-    points = [
-        (row.get(dimension) if dimension else index + 1, _to_number(row.get(measure)))
-        for index, row in enumerate(rows)
-    ]
-    points = [(label, value) for label, value in points if value is not None]
+    points: list[tuple[Any, float]] = []
+    for index, row in enumerate(rows):
+        value = _to_number(row.get(measure))
+        if value is not None:
+            points.append((row.get(dimension) if dimension else index + 1, value))
     if not points:
         return facts
 

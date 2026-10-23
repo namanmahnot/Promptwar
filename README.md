@@ -66,6 +66,7 @@ The LLM is treated as untrusted input. Every guarantee is enforced by determinis
 - **BigQuery**: dry run before every query, `use_query_cache=True`, LIMIT 1000; the UI shows 200 rows.
 - **Prompt size**: PII and geography columns stripped from the schema DDL. The schema is built once at startup from table metadata, which is free, unlike a billed `INFORMATION_SCHEMA` query.
 - **Gemini resilience**: 20 s timeout, 1 retry on 429/5xx with backoff, then one fallback to `GEMINI_MODEL_LITE`. Model IDs come only from env.
+- **Transport**: gzip for responses over 1 KB; Vite-fingerprinted assets served with `Cache-Control: immutable` for one year.
 - **Frontend**: Firebase SDK and Recharts are lazy-loaded chunks.
 
 ## Technology implemented
@@ -106,14 +107,15 @@ Measured, not claimed: `python -m eval.run_eval --save` runs the **20 golden que
 
 ## Code quality, testing and accessibility
 
-- **Tests**: 143 pytest tests and 18 Vitest tests, all green, with no network and no credentials (Gemini, BigQuery, Firebase and Firestore are faked):
+- **Tests**: **173 pytest tests (93% coverage, ≥ 90% enforced)** and **27 Vitest tests (88% statements / 94% lines, thresholds enforced)**, all green, with no network and no credentials (Gemini, BigQuery, Firebase and Firestore are faked):
   - [test_validator.py](agent/tests/test_validator.py): a passing and a failing case for every validator rule, including the `-- ;DROP` comment trick.
   - [test_grounding.py](agent/tests/test_grounding.py) for the number-grounding checker.
   - [test_graph.py](agent/tests/test_graph.py): retry loop, cost cap, outages, template fallback.
   - [test_api.py](agent/tests/test_api.py): 401, 400, 413, 422, 429, cache, history ownership, headers, SPA serving.
   - [test_evaluation.py](agent/tests/test_evaluation.py) for the result comparator and the attack set.
+  - [test_adapters.py](agent/tests/test_adapters.py): Gemini retry and fallback, BigQuery job config and errors, the Firestore store.
   - Web tests include **axe-core** accessibility checks on every page state.
-- **Lint**: ruff (with bandit-style `S` rules) and ESLint (React, hooks, jsx-a11y *strict*). CI runs lint, tests, the build and a secret scan on every push.
+- **Static analysis**: ruff (with bandit-style `S` security rules), **mypy** (clean), and ESLint (React, hooks, jsx-a11y *strict*). CI runs lint, type checks, tests with coverage gates, the build, `pip-audit`, `npm audit` and a secret scan on every push. **CodeQL** (security-extended) and **Dependabot** watch the repo. Policy and threat-to-test map: [SECURITY.md](SECURITY.md).
 - **Accessibility**:
   - Navigation and focus: skip link, landmarks, `aria-current`, and focus moves to each new answer and page.
   - Announcements: errors via `role="alert"`, progress via `role="status"`.
@@ -139,7 +141,7 @@ VITE_AUTH_DEV_BYPASS=true npm run dev                    # http://localhost:5173
 
 `AUTH_DEV_BYPASS` accepts the literal token `dev` and is **refused at startup** unless `APP_ENV=development`.
 
-Tests and lint: `cd agent && pytest && ruff check app tests eval` · `cd web && npm run lint && npm test`.
+Tests and checks: `cd agent && pytest && ruff check app tests eval && mypy app` · `cd web && npm run lint && npm test`.
 
 ## Deploy to Cloud Run (copy-paste)
 

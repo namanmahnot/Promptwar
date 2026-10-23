@@ -19,6 +19,19 @@ ignore = ["S101", "S608"]
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S"]
 
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+# LangGraph's add_node overloads do not accept plain callables over a total=False TypedDict.
+module = "app.graph"
+disable_error_code = ["call-overload"]
+
 [tool.coverage.run]
 branch = true
 omit = ["app/__init__.py"]

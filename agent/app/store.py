@@ -92,8 +92,8 @@ class FirestoreStore:
         snapshot = self._db.collection("cache").document(key).get(timeout=5)
         if not snapshot.exists:
             return None
-        data = snapshot.to_dict()
-        return data["response"] if data["expiresAt"] > _now() else None
+        data = snapshot.to_dict() or {}
+        return data["response"] if data.get("expiresAt") and data["expiresAt"] > _now() else None
 
     def save_cached(self, key: str, response: dict, ttl_seconds: int) -> None:
         # A Firestore TTL policy on `expiresAt` deletes stale entries (see README).

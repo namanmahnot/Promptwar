@@ -111,7 +111,8 @@ def build_graph(deps: Dependencies):
     def prefilter_node(state: AgentState) -> NodeResult:
         result = prefilter(state["question"])
         if not result.ok:
-            return {**_blocked(result.code, result.reason), "question": result.question}, "blocked", result.code
+            code, reason = result.code or "UNSAFE_REQUEST", result.reason or "Request blocked."
+            return {**_blocked(code, reason), "question": result.question}, "blocked", code
         return {"question": result.question}, "ok", "no unsafe patterns"
 
     def write_sql_node(state: AgentState) -> NodeResult:
@@ -157,7 +158,7 @@ def build_graph(deps: Dependencies):
 
     def dry_run_node(state: AgentState) -> NodeResult:
         try:
-            estimate = deps.warehouse.dry_run(state["sql"])
+            estimate = deps.warehouse.dry_run(state["sql"] or "")
         except QueryError as err:
             return _retry_or_fail(state["attempts"], str(err)), "retry", str(err)
         detail = f"{estimate:,} bytes estimated (cap {settings.max_bytes:,})"
@@ -168,7 +169,7 @@ def build_graph(deps: Dependencies):
 
     def execute_node(state: AgentState) -> NodeResult:
         try:
-            result = deps.warehouse.execute(state["sql"])
+            result = deps.warehouse.execute(state["sql"] or "")
         except QueryError as err:
             return _retry_or_fail(state["attempts"], str(err)), "retry", str(err)
         update = {

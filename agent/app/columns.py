@@ -28,7 +28,8 @@ def is_temporal(column: dict) -> bool:
 
 
 def classify(columns: list[dict]) -> Roles:
-    dimensions, measures = [], []
+    dimensions: list[dict] = []
+    measures: list[dict] = []
     for column in columns:
         is_measure = (
             column["type"] in NUMERIC_TYPES
