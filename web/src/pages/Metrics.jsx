@@ -16,24 +16,17 @@ function Stat({ label, value, target }) {
 export function Metrics() {
   const api = useApi();
   const [evalRun, setEvalRun] = useState(undefined);
-  const [live, setLive] = useState(null);
   const [error, setError] = useState(null);
   useDocumentTitle('Metrics');
 
   useEffect(() => {
-    Promise.all([api.evalLatest(), api.live()]).then(
-      ([latest, liveStats]) => {
-        setEvalRun(latest.run);
-        setLive(liveStats);
-      },
-      (err) => setError(err.message),
-    );
+    api.evalLatest().then((latest) => setEvalRun(latest.run), (err) => setError(err.message));
   }, [api]);
 
   return (
     <>
       <h1 className="text-2xl font-bold text-slate-900">Proof: accuracy, safety, speed and cost</h1>
-      <p className="mt-1 text-slate-700">Measured on a golden set of 20 questions and 10 attack prompts, plus live traffic.</p>
+      <p className="mt-1 text-slate-700">Measured on a golden set of 20 questions and 10 attack prompts, run against the live model and BigQuery.</p>
       {error && (
         <p role="alert" className="mt-4 text-rose-800">
           {error}
@@ -105,24 +98,6 @@ export function Metrics() {
           </>
         )}
       </section>
-
-      {live && (
-        <section aria-labelledby="live-heading" className="mt-10">
-          <h2 id="live-heading" className="text-lg font-semibold text-slate-900">
-            Live — last {live.count} questions
-          </h2>
-          <dl className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
-            <Stat label="Answered" value={live.byStatus.answered} />
-            <Stat label="Served from cache" value={live.byStatus.cached} />
-            <Stat label="Blocked" value={live.byStatus.blocked} />
-            <Stat label="Failed" value={live.byStatus.failed} />
-            <Stat label="Cache hit rate" value={formatPercent(live.cacheHitRate)} />
-            <Stat label="p50 latency (uncached)" value={formatMs(live.p50LatencyMs)} />
-            <Stat label="p50 latency (cached)" value={formatMs(live.p50CachedLatencyMs)} target="≤ 1 s" />
-            <Stat label="Median bytes scanned" value={formatBytes(live.medianBytesProcessed)} />
-          </dl>
-        </section>
-      )}
     </>
   );
 }

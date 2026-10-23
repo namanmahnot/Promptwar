@@ -23,3 +23,4 @@ insightpilot-docs.zip
 .DS_Store
 .vscode/
 .claude/
+!web/.env.production

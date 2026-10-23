@@ -1,0 +1,14 @@
+**/node_modules
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/.env*
+!web/.env.production
+web/dist
+docs
+.git
+.github
+*.zip
+agent/tests
+agent/eval/__pycache__

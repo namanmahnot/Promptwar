@@ -8,9 +8,7 @@ import { answered, blocked } from './fixtures.js';
 const api = {
   ask: vi.fn(),
   history: vi.fn(),
-  query: vi.fn(),
   evalLatest: vi.fn(),
-  live: vi.fn(),
 };
 vi.mock('../lib/useApi.js', () => ({ useApi: () => api }));
 
@@ -38,7 +36,6 @@ beforeEach(() => {
   auth.user = { uid: 'u1', displayName: 'Ada' };
   api.history.mockResolvedValue({ items: [] });
   api.evalLatest.mockResolvedValue({ run: null });
-  api.live.mockResolvedValue({ count: 0, byStatus: { answered: 0, cached: 0, blocked: 0, failed: 0 } });
 });
 
 describe('Ask page', () => {
@@ -111,19 +108,19 @@ describe('navigation and layout', () => {
 });
 
 describe('History page', () => {
-  it('lists past questions as links to their answers', async () => {
+  it('lists my past questions with their status', async () => {
     api.history.mockResolvedValue({
       items: [{ queryId: 'abc', question: 'Revenue by month', status: 'answered', latencyMs: 5000, createdAt: '2026-10-23T10:00:00Z' }],
     });
     const { container } = renderAt('/history');
-    const link = await screen.findByRole('link', { name: /Revenue by month/ });
-    expect(link).toHaveAttribute('href', '/history/abc');
+    expect(await screen.findByText('Revenue by month')).toBeInTheDocument();
+    expect(screen.getByText('Answered')).toBeInTheDocument();
     await expectNoAxeViolations(container);
   });
 });
 
 describe('Metrics page', () => {
-  it('shows the latest eval run and live stats accessibly', async () => {
+  it('shows the latest eval run accessibly', async () => {
     api.evalLatest.mockResolvedValue({
       run: {
         startedAt: '2026-10-23T10:00:00Z',
@@ -139,14 +136,6 @@ describe('Metrics page', () => {
         meanLlmCalls: 2.1,
         results: [{ qid: 'G01', question: 'Top 5 categories', pass: true, ms: 6000, sql: 'SELECT 1' }],
       },
-    });
-    api.live.mockResolvedValue({
-      count: 3,
-      byStatus: { answered: 1, cached: 1, blocked: 1, failed: 0 },
-      cacheHitRate: 0.5,
-      p50LatencyMs: 6000,
-      p50CachedLatencyMs: 40,
-      medianBytesProcessed: 1000,
     });
     const { container } = renderAt('/metrics');
 

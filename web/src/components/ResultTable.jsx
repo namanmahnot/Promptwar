@@ -1,4 +1,3 @@
-import { csvFilename, downloadCsv } from '../lib/csv.js';
 import { formatValue, humanize } from '../lib/format.js';
 
 const NUMERIC = new Set(['INT64', 'FLOAT64', 'NUMERIC', 'BIGNUMERIC']);
@@ -11,20 +10,11 @@ export function ResultTable({ data, caption = 'Query result' }) {
         <h3 id="table-heading" className="text-sm font-semibold uppercase tracking-wide text-slate-600">
           Data
         </h3>
-        <div className="flex items-center gap-3">
-          <p className="text-sm text-slate-700">
-            {data.truncated
-              ? `Showing ${data.rows.length} of ${data.rowCount} rows`
-              : `${data.rowCount} row${data.rowCount === 1 ? '' : 's'}`}
-          </p>
-          <button
-            type="button"
-            onClick={() => downloadCsv(csvFilename(caption), data.columns, data.rows)}
-            className="min-h-11 rounded-md border border-slate-300 px-3 text-sm font-medium text-slate-800 hover:bg-slate-50"
-          >
-            Download CSV<span className="sr-only"> of the result rows</span>
-          </button>
-        </div>
+        <p className="text-sm text-slate-700">
+          {data.truncated
+            ? `Showing ${data.rows.length} of ${data.rowCount} rows`
+            : `${data.rowCount} row${data.rowCount === 1 ? '' : 's'}`}
+        </p>
       </div>
       {/* Scrollable region is focusable so keyboard users can scroll it. */}
       <div className="mt-3 max-h-96 overflow-auto" tabIndex={0} role="region" aria-label="Result rows, scrollable">

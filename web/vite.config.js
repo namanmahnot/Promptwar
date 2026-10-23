@@ -4,6 +4,10 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  // In development the FastAPI service runs on :8000; in production it serves this app itself.
+  server: {
+    proxy: { '/api': 'http://localhost:8000', '/healthz': 'http://localhost:8000' },
+  },
   build: {
     sourcemap: false,
     rollupOptions: {

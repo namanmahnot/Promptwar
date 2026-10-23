@@ -1,0 +1,24 @@
+# Free alternative to Cloud Run (no billing): Render → New → Blueprint → this repo.
+services:
+  - type: web
+    name: insightpilot
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /healthz
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GOOGLE_SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: GCP_PROJECT
+        value: promptwar-naman
+      - key: GEMINI_MODEL_SQL
+        value: gemini-3.5-flash
+      - key: GEMINI_MODEL_LITE
+        value: gemini-3.5-flash-lite
+      - key: BQ_MAX_BYTES
+        value: "1000000000"
+      - key: PROMPT_VERSION
+        value: v1

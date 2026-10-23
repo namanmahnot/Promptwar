@@ -50,7 +50,7 @@ export function ProgressSteps() {
       </ol>
       {slow && (
         <p role="status" className="mt-3 text-sm text-slate-700">
-          Taking longer than usual — the server may be waking up from sleep (free hosting). This can take up to a minute.
+          Taking longer than usual. Complex questions or a cold server can take up to a minute.
         </p>
       )}
     </div>

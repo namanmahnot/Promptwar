@@ -3,7 +3,6 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { AnswerView } from '../components/AnswerView.jsx';
 import { ProgressSteps } from '../components/ProgressSteps.jsx';
-import { csvFilename, toCsv } from '../lib/csv.js';
 import { formatBytes, formatMs, formatPercent, formatValue } from '../lib/format.js';
 import { answered, blocked } from './fixtures.js';
 
@@ -72,25 +71,6 @@ describe('ProgressSteps', () => {
     render(<ProgressSteps />);
     expect(screen.getByRole('status')).toHaveTextContent('Checking the question');
     expect(screen.getByRole('list', { name: 'Analysis steps' }).querySelector('[aria-current="step"]')).not.toBeNull();
-  });
-});
-
-describe('CSV export', () => {
-  it('escapes quotes, commas and newlines', () => {
-    const columns = [{ name: 'name' }, { name: 'n' }];
-    expect(toCsv(columns, [{ name: 'a, "b"\nc', n: 1 }])).toBe('name,n\r\n"a, ""b""\nc",1');
-  });
-
-  it('neutralises spreadsheet formulas but keeps negative numbers', () => {
-    const columns = [{ name: 'v' }];
-    expect(toCsv(columns, [{ v: '=HYPERLINK("x")' }, { v: '@SUM(A1)' }, { v: -5 }])).toBe(
-      'v\r\n"\'=HYPERLINK(""x"")"\r\n\'@SUM(A1)\r\n-5',
-    );
-  });
-
-  it('builds a safe filename from the question', () => {
-    expect(csvFilename('Top 5 categories / revenue?')).toBe('top-5-categories-revenue.csv');
-    expect(csvFilename('???')).toBe('result.csv');
   });
 });
 

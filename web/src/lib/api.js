@@ -1,10 +1,7 @@
-const API_URL = (import.meta.env.VITE_API_URL ?? 'http://localhost:8080').replace(/\/$/, '');
+// Same origin by default: the API serves this app (and Vite proxies /api in development).
+// Set VITE_API_URL only when the web app is hosted elsewhere, e.g. Firebase Hosting.
+const API_URL = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
 const RESULT_STATUSES = new Set(['answered', 'cached', 'blocked', 'failed']);
-
-/** Free hosting sleeps when idle; ping on page load so it is awake by the time the user asks. */
-export function warmUpServer() {
-  fetch(`${API_URL}/healthz`, { mode: 'cors' }).catch(() => {});
-}
 
 export class ApiError extends Error {
   constructor(status, code, message, requestId) {
@@ -48,9 +45,7 @@ export function createApi(getToken) {
 
   return {
     ask: (question, signal) => request('/api/ask', { method: 'POST', body: { question }, signal }),
-    history: () => request('/api/history?limit=20'),
-    query: (id) => request(`/api/queries/${encodeURIComponent(id)}`),
+    history: () => request('/api/history'),
     evalLatest: () => request('/api/metrics/eval/latest'),
-    live: () => request('/api/metrics/live'),
   };
 }

@@ -181,3 +181,25 @@ def test_dev_bypass_refused_outside_development(monkeypatch):
     with pytest.raises(RuntimeError, match="AUTH_DEV_BYPASS"):
         get_settings()
     get_settings.cache_clear()
+
+
+# --- serving the web app --------------------------------------------------------------
+
+
+def test_serves_spa_with_fallback_and_no_traversal(tmp_path):
+    dist = tmp_path / "dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text("<!doctype html><title>InsightPilot</title>", encoding="utf-8")
+    (dist / "assets" / "app.js").write_text("console.log(1)", encoding="utf-8")
+    (tmp_path / "secret.txt").write_text("nope", encoding="utf-8")
+
+    agent, deps = make_agent(FakeLlm([plan()]))
+    services = Services(deps=deps, agent=agent, store=MemoryStore(), verify_token=verify, limiter=RateLimiter())
+    app = create_app(services, settings=deps.settings.__class__(**{**deps.settings.__dict__, "web_dist": str(dist)}))
+    with TestClient(app) as client:
+        assert "InsightPilot" in client.get("/").text
+        assert "InsightPilot" in client.get("/history").text  # client-side route
+        assert client.get("/assets/app.js").text == "console.log(1)"
+        assert client.get("/api/nope").status_code == 404
+        assert "nope" not in client.get("/..%2Fsecret.txt").text
+        assert client.get("/").headers["Content-Security-Policy"].startswith("default-src 'self'")

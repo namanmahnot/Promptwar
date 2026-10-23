@@ -4,7 +4,6 @@ import { useAuth } from './lib/auth.jsx';
 import { Ask } from './pages/Ask.jsx';
 import { History } from './pages/History.jsx';
 import { Metrics } from './pages/Metrics.jsx';
-import { QueryDetail } from './pages/QueryDetail.jsx';
 import { SignIn } from './pages/SignIn.jsx';
 
 function NotFound() {
@@ -35,7 +34,6 @@ export function AppRoutes() {
       <Route element={<Layout />}>
         <Route index element={<Ask />} />
         <Route path="history" element={<History />} />
-        <Route path="history/:id" element={<QueryDetail />} />
         <Route path="metrics" element={<Metrics />} />
         <Route path="*" element={<NotFound />} />
       </Route>
