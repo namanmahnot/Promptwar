@@ -1,5 +1,5 @@
 # One service: FastAPI (auth, rate limits, agent) also serves the built React app. Runs on Cloud Run ($PORT).
-FROM node:22-bookworm-slim AS web
+FROM node:25-bookworm-slim AS web
 WORKDIR /web
 COPY web/package*.json ./
 RUN npm ci
